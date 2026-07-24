@@ -1,0 +1,24 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+
+# Secrets / local config — keep your real API keys out of git
+config/config.py
+
+# Hugging Face / model cache
+.cache/
+*.safetensors
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
