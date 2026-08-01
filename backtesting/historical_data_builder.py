@@ -45,7 +45,6 @@ from data_fetching.fetcher import DataFetcher
 from sentiment_analysis.analyzer import SentimentAnalyzer
 from signal_engine.engine import SignalEngine
 
-pd.set_option('display.max_columns', None)
 
 class HistoricalDataBuilder:
     def __init__(self, news_api_key: str = None, finnhub_api_key: str = None):
@@ -112,6 +111,9 @@ class HistoricalDataBuilder:
         try:
             r = requests.get(url, timeout=10)
             if r.status_code != 200:
+                # Surface *why* it failed -- 429/403 (rate limit or quota)
+                # look identical to "no news that day" unless we print this.
+                print(f"    [backtest-news] HTTP {r.status_code}: {r.text[:150]}")
                 return []
             data = r.json()
             raw = data if is_list else data.get("articles", [])
@@ -171,7 +173,9 @@ class HistoricalDataBuilder:
                 "price_3d": self._forward_close(price_hist, entry_idx, 3),
                 "price_7d": self._forward_close(price_hist, entry_idx, 7),
             })
-            time.sleep(1)  # polite pacing against free-tier rate limits
+            time.sleep(1.2)  # a full year of daily calls sits close to Finnhub's free-tier
+            # 60/min rate limit at exactly 1 req/sec -- a slightly wider gap avoids
+            # bumping into it over a long run
 
         return pd.DataFrame(rows)
 
@@ -181,40 +185,3 @@ class HistoricalDataBuilder:
         if target >= len(price_hist):
             return None
         return float(price_hist["Close"].iloc[target])
-
-
-if __name__ == "__main__":
-    from config.config import NEWS_API_KEY, FINNHUB_API_KEY
-
-    builder = HistoricalDataBuilder(news_api_key=NEWS_API_KEY, finnhub_api_key=FINNHUB_API_KEY)
-
-    # Gold -- Finnhub company-news on GLD is reliably historical (up to
-    # ~1yr on the free tier).
-    gold_cfg = {
-        "ticker": "GC=F",
-        "name": "Gold",
-        "news": {"source": "finnhub_company", "symbol": "GLD",
-                 "query": 'gold OR bullion OR "precious metals" OR XAU',
-                 "domains": "kitco.com,fxstreet.com,investing.com,marketwatch.com,reuters.com,cnbc.com"},
-    }
-
-    # BTC -- Finnhub's crypto *category* feed has no historical range, but
-    # company-news does, so this points at GBTC (Grayscale Bitcoin Trust) --
-    # same trick as GLD for gold, a security whose news coverage tracks the
-    # asset. NewsAPI stays wired up as an automatic fallback if Finnhub is
-    # empty for a given day (see fetch_news_for_date).
-    # Caveat: GBTC only trades/has news on NYSE weekdays, while BTC-USD has
-    # price data every day -- expect news gaps on weekends that price data
-    # won't have.
-    btc_cfg = {
-        "ticker": "BTC-USD",
-        "name": "Bitcoin",
-        "news": {"source": "finnhub_company", "symbol": "GBTC",
-                 "query": "bitcoin OR BTC cryptocurrency"},
-    }
-
-    for cfg, filename in [(gold_cfg, "gold_backtest_1mo.csv"), (btc_cfg, "btc_backtest_1mo.csv")]:
-        df = builder.build_dataset(cfg, start="2026-06-30", end="2026-07-31")
-        print(f"\n{cfg['name']}:")
-        print(df)
-        df.to_csv(f"backtesting/{filename}", index=False)
