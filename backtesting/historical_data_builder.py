@@ -77,9 +77,13 @@ class HistoricalDataBuilder:
         next_day_str = (day + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
         if source == "finnhub_company" and news_cfg.get("symbol") and self.fetcher.finnhub_api_key:
+            # Finnhub's from/to are inclusive on both ends -- from=day,to=day+1
+            # would double-count into the next day's query too, which is what
+            # caused the repeated headlines across consecutive days. from=day,
+            # to=day alone is the true single-day window.
             url = (
                 f"https://finnhub.io/api/v1/company-news?symbol={news_cfg['symbol']}"
-                f"&from={day_str}&to={next_day_str}&token={self.fetcher.finnhub_api_key}"
+                f"&from={day_str}&to={day_str}&token={self.fetcher.finnhub_api_key}"
             )
             headlines = self._fetch_and_clean(url, num_headlines, field="headline", is_list=True)
             if headlines:
@@ -87,7 +91,17 @@ class HistoricalDataBuilder:
 
         # Finnhub category news has no historical range on the free tier --
         # NewsAPI's date-scoped search is the fallback that actually works
-        # for BTC within its ~1 month free window.
+        # for BTC within its ~1 month free window. NewsAPI's from/to are
+        # timestamps that default to midnight, so it needs the day+1
+        # boundary to actually cover the full 24h of `day` -- unlike Finnhub
+        # above, this one stays as a two-value range on purpose.
+        # NewsAPI's free tier only serves ~1 month of history -- for
+        # anything older, skip the call entirely rather than let it fail
+        # with a 426 every time (we already know it will).
+        newsapi_days_back = (pd.Timestamp.now(tz=day.tzinfo) - day).days
+        if newsapi_days_back > 29:
+            return []
+
         if self.fetcher.news_api_key and self.fetcher.news_api_key != "YOUR_NEWSAPI_KEY":
             query = news_cfg.get("query") or asset_cfg.get("name", "")
             url = (
