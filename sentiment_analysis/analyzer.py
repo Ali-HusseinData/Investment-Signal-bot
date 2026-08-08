@@ -16,24 +16,31 @@ class SentimentAnalyzer:
             return {"sentiment": "neutral", "score": 0.0}
 
         results = self.nlp(headlines)
-        
-        # Mapping FinBERT labels to scores: positive=1, neutral=0, negative=-1
-        score_map = {"positive": 1, "neutral": 0, "negative": -1}
-        
-        total_score = 0
+
+        # Sign per label; FinBERT's own confidence (res['score']) weights it,
+        # instead of flattening every headline to a bare +1/0/-1. A headline
+        # FinBERT is 95% sure is negative should count for more than one
+        # it's only 51% sure about -- averaging discrete labels was throwing
+        # that information away and left avg_score only able to land on a
+        # handful of exact values (0, +/-0.2, +/-0.4, ...) with ~5
+        # headlines/day, uncomfortably close to the +/-0.2 threshold itself.
+        sign_map = {"positive": 1, "neutral": 0, "negative": -1}
+
+        total_score = 0.0
         for res in results:
             label = res['label'].lower()
-            total_score += score_map.get(label, 0)
-        
+            confidence = res['score']
+            total_score += sign_map.get(label, 0) * confidence
+
         avg_score = total_score / len(headlines)
-        
+
         if avg_score > 0.2:
             sentiment = "positive"
         elif avg_score < -0.2:
             sentiment = "negative"
         else:
             sentiment = "neutral"
-            
+
         return {
             "sentiment": sentiment,
             "score": avg_score,
