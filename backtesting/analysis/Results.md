@@ -13,3 +13,7 @@ The results suggest that **a single signal strategy should not be applied equall
 Although many individual results do not reach a strong statistical significance threshold, the consistency of these patterns across multiple holding periods provides a useful direction for further development.
 
 The next step is therefore not simply to make the signal rules more symmetric, but to investigate **asset-specific signal logic** and determine whether these observed differences remain consistent on additional data.
+
+### Update
+
+The results are going fully published in the upcoming days.
