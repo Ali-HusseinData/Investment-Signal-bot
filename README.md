@@ -1,109 +1,121 @@
-# Backtesting Findings — Investment Signal Bot
+# Investment Signal Bot
 
-## Objective
+A modular Python system that generates and validates sentiment-driven investment signals using financial news, FinBERT, and quantitative backtesting.
 
-Determine whether FinBERT-scored news sentiment, as implemented in this
-project's live signal engine, has genuine predictive value for short-term
-price movement in Gold (GC=F) and Bitcoin (BTC-USD) — and if so, how much
-of that predictive value actually comes from sentiment versus from simple
-trend-following.
+The project combines real-time market data, financial news sentiment analysis, and a customizable signal engine to produce Buy/Sell/Hold recommendations. An integrated backtesting framework replays that same signal-generation logic over historical data to evaluate the reliability and statistical effectiveness of the signals before they're trusted live.
 
-## Methodology
+## Features
 
-- 1 year of historical data (Aug 2025 - Jul 2026) per asset, replayed
-  through the exact same fetch -> FinBERT -> signal logic the live bot
-  uses, not a reimplementation of it.
-- News sourced primarily from Finnhub's `/company-news` (via GLD for gold,
-  GBTC as a Bitcoin proxy, since neither asset is itself a public company),
-  with NewsAPI as an automatic fallback within its own history limits.
-- Entry price = next trading day's open after a signal, not same-day
-  close, since a full day's headlines aren't knowable until the day is
-  over — same-day close was never actually tradeable.
-- Forward returns measured at 1, 3, and 7 trading days.
-- FinBERT sentiment is confidence-weighted (each headline's contribution
-  scaled by the model's own confidence in its label), not flattened to a
-  bare +1/0/-1 — an early version of this pipeline had that bug, and the
-  numbers below are from the corrected version.
-- Three benchmarks isolate what's actually driving accuracy: **base rate**
-  (naive "the asset just trended this way" baseline), **trend-only**
-  (ignore sentiment, follow the 50-day MA), and **sentiment-only,
-  symmetric** (ignore trend, bet the sign of sentiment in both
-  directions — unlike the live engine's asymmetric BUY/SELL rule).
+- **Data Fetching**: Retrieves current prices and technical indicators (50-day Moving Average) using `yfinance`, and fetches financial news headlines primarily from Finnhub (company-news and category feeds), with NewsAPI as an automatic fallback.
+- **Sentiment Analysis**: Utilizes the `transformers` library with the pre-trained FinBERT model (`ProsusAI/finbert`) to analyze the sentiment of news headlines, weighted by the model's own confidence rather than flattened to a bare positive/neutral/negative label.
+- **Signal Logic Engine**: Generates 'Buy', 'Sell', or 'Hold' signals based on a combination of technical data and news sentiment.
+- **Modular Architecture**: Code is separated into distinct modules for easy maintenance, updates, and swapping out components (e.g., different news APIs, sentiment models, or signal logic).
+- **Historical Backtesting**: A separate backtesting module replays the exact same fetch → sentiment → signal logic over historical data, so the backtest scores the real strategy rather than a reimplementation of it.
+- **Alerting Placeholder**: Includes a placeholder function for integrating with external alerting services like Telegram or Discord webhooks.
 
-## Results
+## Project Structure
 
-**Gold** — trend dominates, sentiment adds nothing or actively hurts:
+```
+investment_signal_bot/
+├── config/
+│   ├── __init__.py
+│   └── config.py             # API keys and configuration
+├── data_fetching/
+│   ├── __init__.py
+│   └── fetcher.py            # Handles price data and news fetching
+├── sentiment_analysis/
+│   ├── __init__.py
+│   └── analyzer.py           # FinBERT sentiment analysis (confidence-weighted)
+├── signal_engine/
+│   ├── __init__.py
+│   └── engine.py             # Signal generation logic and alerting
+├── backtesting/
+│   ├── __init__.py
+│   ├── historical_data_builder.py  # Shared class: historical price + date-scoped news + FinBERT + signal replay
+│   ├── gold_backtesting.py         # Runs the Gold (GC=F) backtest -> backtesting/data/gold_backtest_1y.csv
+│   ├── btc_backtesting.py          # Runs the Bitcoin (BTC-USD) backtest -> backtesting/data/btc_backtest_1y.csv
+│   ├── data/                       # Generated backtest CSVs (not hand-written, safe to regenerate)
+│   └── analysis/
+│       ├── Investment_Signal_bot.ipynb  # Colab notebook: accuracy/return/profit-factor + trend/sentiment/base-rate benchmarks
+│       └── results.md                   # Write-up of what the backtest found, in plain language
+├── main.py                   # Main orchestrator to run the bot
+└── requirements.txt          # Python dependencies
+└── README.md                 # Project README
+```
 
-| Horizon | Base rate | Trend-only | Sentiment-only | Current combined signal |
-|---|---|---|---|---|
-| 1d | 56.7% | 56.7% | 46.5% | 51.0% |
-| 3d | 56.8% | **64.4%** | 53.1% | 59.8% |
-| 7d | 57.3% | **62.5%** | 52.7% | 57.3% |
+## Setup and Installation
 
-Trend-only clearly and consistently beats both the base rate and
-sentiment-only. The current combined signal sits *below* trend-only at
-every horizon — mixing sentiment in is currently making Gold's signal
-worse than simply following the trend would be.
+1.  **Clone the repository (or create the files manually):**
 
-**Bitcoin** — the opposite pattern; trend is unreliable, sentiment is the
-(modest) edge:
+    ```bash
+    git clone <repository_url>
+    cd investment_signal_bot
+    ```
 
-| Horizon | Base rate | Trend-only | Sentiment-only | Current combined signal |
-|---|---|---|---|---|
-| 1d | 47.9% | 49.8% | 53.8% | 53.8% |
-| 3d | 43.7% | 45.6% | 48.5% | 48.1% |
-| 7d | 43.6% | 49.3% | 52.5% | 52.6% |
+2.  **Create a Python virtual environment (recommended):**
 
-BTC had a rough year (~-45%), so trend-following was unreliable.
-Sentiment-only is the consistent best performer of the three ablations at
-every horizon, and the live engine's combined signal roughly tracks it —
-mainly because BTC's BUY branch (which requires trend confirmation) fires
-rarely, so the combined result is close to a sentiment-only result in
-practice.
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
 
-## Key finding
+3.  **Install dependencies:**
 
-**A single sentiment rule is not equally valid across assets.** Gold's
-edge (what little exists) comes from trend; Bitcoin's comes from
-sentiment. Neither individual result is overwhelmingly strong on its own —
-several confidence intervals still touch 50% — but the pattern holds
-consistently across all three horizons for both assets, which is more
-convincing than any single accuracy number in isolation.
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-## Limitations
+4.  **Configure API Keys:**
 
-- Small sample: 76-238 scored days per asset/horizon/method depending on
-  news availability. Several individual accuracy figures don't clear a
-  strict 95% significance bar on their own.
-- No transaction costs, slippage, or spread modeled — real trading would
-  erode every edge shown here, especially the smaller ones.
-- Single one-year window. Gold trended up and Bitcoin trended down during
-  this specific period; the base-rate numbers above are a symptom of that,
-  not a general property of either asset.
-- FinBERT is a sentence-level tone classifier, not an economic-reasoning
-  model — spot-checking headlines surfaced at least one clear miss (a
-  "weak dollar" headline scored negative on tone despite being classically
-  *bullish* for gold), which the model has no way to catch.
+    Copy the template to create your own local config (which is git-ignored, so
+    your keys are never committed):
 
-## Conclusion
+    ```bash
+    cp config/config.example.py config/config.py     # macOS/Linux
+    copy config\config.example.py config\config.py   # Windows
+    ```
 
-The live engine's current logic (BUY requires trend + sentiment, SELL
-requires sentiment alone) was not validated by this backtest — for Gold it
-underperforms simple trend-following, and for Bitcoin it's effectively
-riding sentiment-only's modest edge rather than adding something beyond
-it. This isn't recommended for live capital as-is.
+    Then open `config/config.py` and fill in your keys:
 
-## Suggested future work
+    ```python
+    # config/config.py
+    NEWS_API_KEY = "YOUR_NEWSAPI_KEY"
+    FINNHUB_API_KEY = "YOUR_FINNHUB_KEY"
+    ```
 
-- Asset-aware logic (weight trend more heavily for Gold, sentiment more
-  heavily for BTC) — deliberately *not* implemented in this round, since
-  tuning it on the same year being reported here would be overfitting to
-  this exact sample rather than a genuine improvement.
-- A longer backtest window, to check whether the trend/sentiment split
-  found here holds up outside this specific year.
-- Headline importance weighting (keyword/topic tags, publisher tier,
-  cross-source corroboration) as a more principled improvement than
-  treating every headline equally — worth pursuing only after there's a
-  longer-window result to validate it against.
-- Transaction cost modeling before any of these numbers are taken as
-  representative of tradeable performance.
+    You can obtain free API keys from [NewsAPI.org](https://newsapi.org/) and
+    [Finnhub.io](https://finnhub.io/).
+
+## How to Run
+
+Execute the `main.py` script from the project root:
+
+```bash
+python main.py
+```
+
+The bot will process the predefined assets, fetch data, analyze sentiment, generate signals, and print a daily summary report to the console. It will also show a placeholder message for sending alerts.
+
+## Backtesting
+
+The backtesting module validates whether the sentiment-driven signals generated by FinBERT have had predictive value over past market movements, by replaying the live bot's own logic against historical data instead of reimplementing it separately.
+
+**What's built:**
+
+- **Historical data builder** (`backtesting/historical_data_builder.py`) reuses the live bot's `DataFetcher`, `SentimentAnalyzer`, and `SignalEngine` directly, so backtested signals are scored with the exact same logic the live bot runs -- not a parallel approximation of it.
+- **Per-asset runner scripts** (`gold_backtesting.py`, `btc_backtesting.py`) each pull a configurable historical window (currently 1 year) for their asset independently.
+- **Historical news sourcing** via Finnhub's `/company-news` endpoint (true single-day date-scoped queries), using proxy symbols for assets that aren't public companies themselves -- `GLD` for gold, `GBTC` for Bitcoin -- since Finnhub's free-tier category/crypto news feeds have no historical range. NewsAPI serves as an automatic fallback where Finnhub returns nothing, within NewsAPI's own ~1 month free-tier history limit.
+- **Dataset schema**: `signal_date`, `entry_date`, `asset`, `headline_summary`, `sentiment_score`, `signal`, `entry_price`, `price_1d`, `price_3d`, `price_7d`. Entry price is deliberately the next trading day's open rather than the same-day close, since a signal isn't actually computable -- and therefore not tradeable -- until a full day of headlines exists.
+- **Output**: dated CSVs under `backtesting/data/` (e.g. `gold_backtest_1y.csv`, `btc_backtest_1y.csv`).
+- **Evaluation** (`backtesting/analysis/Investment_Signal_bot.ipynb`): signal accuracy, average return per trade, and profit factor, computed per asset and per horizon (1d/3d/7d) -- plus base-rate, trend-only, and sentiment-only benchmarks isolating how much of the accuracy actually comes from sentiment versus from simple trend-following.
+- **Write-up** (`backtesting/analysis/results.md`): the findings in plain language, including where the current signal logic underperforms simple trend-following and where it doesn't, and the caveats that matter (sample size, no transaction costs modeled, single one-year window).
+
+The goal was not only to determine whether the system is profitable, but also to identify its strengths, weaknesses, and the market conditions under which sentiment-based signals are most reliable -- see `results.md` for what was actually found.
+
+## Extending the Bot
+
+-   **Add/Remove Assets**: Modify the `assets` dictionary in `main.py`.
+-   **Change News API**: Implement a new fetching method in `data_fetching/fetcher.py`.
+-   **Swap Sentiment Model**: Modify `sentiment_analysis/analyzer.py` to use a different `transformers` model or an entirely different sentiment analysis approach.
+-   **Refine Signal Logic**: Adjust the `generate_signal` method in `signal_engine/engine.py` to implement more complex trading strategies -- see `backtesting/analysis/results.md` for suggested directions (e.g. asset-aware weighting of trend vs. sentiment) informed by the backtest.
+-   **Implement Real Alerts**: Integrate actual webhook calls in `signal_engine/engine.py` to send alerts to Telegram, Discord, or other platforms.
